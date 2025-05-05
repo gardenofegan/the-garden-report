@@ -415,6 +415,57 @@ def fetch_rss_headlines(feed_url, limit=5, language=DEFAULT_LANGUAGE):
         print(f"[ERROR] RSS fetch error for {feed_url}: {e}")
     return items
 
+def fetch_rss_headlines_with_details(feed_url, limit=5, language=DEFAULT_LANGUAGE):
+    """
+    Fetch headlines and content from an RSS feed, scrape the article link for each, and summarize with AI if content is long.
+    Returns a list of dicts with 'title' and 'content'.
+    """
+    items = []
+    try:
+        feed = feedparser.parse(feed_url)
+        for entry in feed.entries[:limit]:
+            title = entry.title
+            # Get the full description/content
+            content = entry.description if hasattr(entry, 'description') else ''
+
+            # Try to get the article link
+            url = entry.link if hasattr(entry, 'link') else None
+            article_text = ''
+            if url:
+                try:
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    }
+                    resp = requests.get(url, timeout=10, headers=headers)
+                    resp.raise_for_status()
+                    soup = BeautifulSoup(resp.text, 'html.parser')
+                    for script in soup(["script", "style", "nav", "header", "footer", "aside"]):
+                        script.decompose()
+                    text = soup.get_text()
+                    lines = (line.strip() for line in text.splitlines())
+                    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                    article_text = ' '.join(chunk for chunk in chunks if chunk)
+                except Exception as e:
+                    print(f"[WARN] Could not fetch/process article content: {e}")
+
+            # If the article text is long, summarize it
+            if article_text and len(article_text) > 1000:
+                summary = summarize_text_with_openai(article_text[:8000], language=language)
+                content = summary
+            elif article_text:
+                content = article_text
+            else:
+                # If no article text, keep the original description
+                pass
+
+            items.append({
+                "title": title,
+                "content": content
+            })
+    except Exception as e:
+        print(f"[ERROR] RSS fetch error for {feed_url}: {e}")
+    return items
+
 def fetch_weather(city_url):
     """
     Fetch weather data from Open-Meteo API, returning a string description.
@@ -643,7 +694,30 @@ def fetch_rosary(language=DEFAULT_LANGUAGE):
     # Fallback: return the first mystery if none match (shouldn't happen)
     return ROSARY_PRAYERS[0]["mysteries"][0]
 
+def fetch_usccb_readings(language=DEFAULT_LANGUAGE):
+    """
+    Scrape the daily readings and reflection from USCCB.
+    Returns a dictionary with 'readings'.
+    """
+    url = "https://bible.usccb.org/daily-bible-reading/"
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        resp = requests.get(url, timeout=10, headers=headers)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, 'html.parser')
 
+        # The readings are usually in a div with class 'block-usccb-readings-content' or similar
+        readings_elem = soup.find(class_="node--type-daily-reading")
+        readings = readings_elem.get_text(strip=True) if readings_elem else ""
+
+        return {
+            "readings": readings
+        }
+    except Exception as e:
+        print(f"[ERROR] Could not fetch USCCB daily readings: {e}")
+        return None
 
 # ------------------------------------------------------
 # PDF GENERATION
@@ -750,7 +824,7 @@ def build_newspaper_pdf(pdf_filename, story_content, target_pages=2):
     
     def footer(canvas, doc):
         canvas.saveState()
-        # Get current date in French format
+        # Get current date
         try:
             date_str = format_date(datetime.datetime.now(), format="MMMM dd, yyyy", locale='en')
         except:
@@ -966,7 +1040,8 @@ def build_newspaper_pdf(pdf_filename, story_content, target_pages=2):
             elif text.startswith("—") or text.startswith("-"):
                 flowables.append(Paragraph(text, style_definitions["attribution_style"]))
         elif text.strip().split('.')[0].isdigit():  # Check if starts with any number followed by a period
-            flowables.append(Paragraph(text, style_definitions["article_title_style"]))
+            # If it's a Rosary prayer (e.g., '1. Annunciation'), use article_style, not article_title_style
+            flowables.append(Paragraph(text, style_definitions["article_style"]))
         else:
             flowables.append(Paragraph(text, style_to_use))
     
@@ -1036,25 +1111,21 @@ def main(use_cache=False, auto_print=False, articles_per_source=None, target_pag
             content.append("Daily Rosary")
             content.append(SECTION_SEPARATOR)
             content.append(rosary_data["name"])
-            content.append(", ".join(rosary_data["prayers"]))
+            for idx, prayer in enumerate(rosary_data["prayers"], 1):
+                content.append(f"{idx}. {prayer}")
         
-        # Fetch and process Le Temps news
-        # print("Fetching Le Temps news...")
-        # le_temps_news = fetch_rss_headlines(LE_TEMPS_RSS, num_articles, DEFAULT_LANGUAGE)
-        
-        # if le_temps_news:
-        #     content.append("LE TEMPS - TOP STORIES")
-        #     content.append(SECTION_SEPARATOR)
-        #     for idx, item in enumerate(le_temps_news, 1):
-        #         content.append(f"{idx}. {item['title']}")
-        #         if item.get('content'):
-        #             content.append("")
-        #             content.append(item['content'])
-        #         content.append("")
+        # Fetch daily readings and reflections from USCCB Daily Readings
+        print("Fetching daily readings and reflections from USCCB Daily Readings...")
+        usccb_readings_data = fetch_usccb_readings(DEFAULT_LANGUAGE)
+        if usccb_readings_data:
+            content.append("USCCB Daily Readings")
+            content.append(SECTION_SEPARATOR)
+            content.append(usccb_readings_data["readings"])
+
 
         # Fetch and process Eagle Country news
         print("Fetching Eagle Country news...")
-        eagle_country_news = fetch_rss_headlines(EAGLE_COUNTRY_URL, num_articles, DEFAULT_LANGUAGE)
+        eagle_country_news = fetch_rss_headlines_with_details(EAGLE_COUNTRY_URL, num_articles, DEFAULT_LANGUAGE)
         
         if eagle_country_news:
             content.append("Local News - Top Stories")
