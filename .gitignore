@@ -1,0 +1,6 @@
+.env
+.venv/
+press/ 
+cache/
+*.pkl
+.DS_Store
