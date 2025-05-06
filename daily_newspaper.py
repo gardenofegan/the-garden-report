@@ -697,7 +697,7 @@ def fetch_rosary(language=DEFAULT_LANGUAGE):
 def fetch_usccb_readings(language=DEFAULT_LANGUAGE):
     """
     Scrape the daily readings and reflection from USCCB.
-    Returns a dictionary with 'readings'.
+    Returns a dictionary with 'readings' as a formatted string for the PDF.
     """
     url = "https://bible.usccb.org/daily-bible-reading/"
     try:
@@ -708,10 +708,36 @@ def fetch_usccb_readings(language=DEFAULT_LANGUAGE):
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, 'html.parser')
 
-        # The readings are usually in a div with class 'block-usccb-readings-content' or similar
-        readings_elem = soup.find(class_="node--type-daily-reading")
-        readings = readings_elem.get_text(strip=True) if readings_elem else ""
-
+        readings_blocks = soup.find_all(class_="node--type-daily-reading")
+        readings_list = []
+        for block in readings_blocks:
+            innerblocks = block.find_all(class_="innerblock")
+            for inner in innerblocks:
+                # Header
+                header = inner.find(class_="content-header")
+                if header:
+                    name = header.find(class_="name")
+                    address = header.find(class_="address")
+                    header_str = ""
+                    if name:
+                        header_str += name.get_text(strip=True)
+                    if address:
+                        if header_str:
+                            header_str += ": "
+                        header_str += address.get_text(strip=True)
+                else:
+                    header_str = ""
+                # Body
+                body = inner.find(class_="content-body")
+                body_str = body.get_text("\n", strip=True) if body else ""
+                # Combine
+                if header_str:
+                    readings_list.append(header_str)
+                    readings_list.append("\n")  # Blank line between readings
+                if body_str:
+                    readings_list.append(body_str)
+                readings_list.append("\n\n")  # Blank line between readings
+        readings = "\n".join(readings_list).strip()
         return {
             "readings": readings
         }
@@ -1041,7 +1067,7 @@ def build_newspaper_pdf(pdf_filename, story_content, target_pages=2):
                 flowables.append(Paragraph(text, style_definitions["attribution_style"]))
         elif text.strip().split('.')[0].isdigit():  # Check if starts with any number followed by a period
             # If it's a Rosary prayer (e.g., '1. Annunciation'), use article_style, not article_title_style
-            flowables.append(Paragraph(text, style_definitions["article_style"]))
+            flowables.append(Paragraph(text, style_definitions["article_style_small"]))
         else:
             flowables.append(Paragraph(text, style_to_use))
     
@@ -1124,33 +1150,33 @@ def main(use_cache=False, auto_print=False, articles_per_source=None, target_pag
 
 
         # Fetch and process Eagle Country news
-        print("Fetching Eagle Country news...")
-        eagle_country_news = fetch_rss_headlines_with_details(EAGLE_COUNTRY_URL, num_articles, DEFAULT_LANGUAGE)
+        # print("Fetching Eagle Country news...")
+        # eagle_country_news = fetch_rss_headlines_with_details(EAGLE_COUNTRY_URL, num_articles, DEFAULT_LANGUAGE)
         
-        if eagle_country_news:
-            content.append("Local News - Top Stories")
-            content.append(SECTION_SEPARATOR)
-            for idx, item in enumerate(eagle_country_news, 1):
-                content.append(f"{idx}. {item['title']}")
-                if item.get('content'):
-                    content.append("")
-                    content.append(item['content'])
-                content.append("")
+        # if eagle_country_news:
+        #     content.append("Local News - Top Stories")
+        #     content.append(SECTION_SEPARATOR)
+        #     for idx, item in enumerate(eagle_country_news, 1):
+        #         content.append(f"{idx}. {item['title']}")
+        #         if item.get('content'):
+        #             content.append("")
+        #             content.append(item['content'])
+        #         content.append("")
         
 
         # Fetch and process Hacker News stories
-        print("Fetching Hacker News stories...")
-        hn_news = fetch_hackernews_top_stories(num_articles, DEFAULT_LANGUAGE)
+        # print("Fetching Hacker News stories...")
+        # hn_news = fetch_hackernews_top_stories(num_articles, DEFAULT_LANGUAGE)
         
-        if hn_news:
-            content.append("Hacker News - Top Stories")
-            content.append(SECTION_SEPARATOR)
-            for idx, item in enumerate(hn_news, 1):
-                content.append(f"{idx}. {item['title']}")
-                if item.get('content_summary'):
-                    content.append("")
-                    content.append(item['content_summary'])
-                content.append("")
+        # if hn_news:
+        #     content.append("Hacker News - Top Stories")
+        #     content.append(SECTION_SEPARATOR)
+        #     for idx, item in enumerate(hn_news, 1):
+        #         content.append(f"{idx}. {item['title']}")
+        #         if item.get('content_summary'):
+        #             content.append("")
+        #             content.append(item['content_summary'])
+        #         content.append("")
         
         # Add quote of the day
         # print("Fetching quote of the day...")
