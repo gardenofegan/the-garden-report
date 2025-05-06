@@ -48,7 +48,7 @@ USE_OPENAI_SUMMARY = False
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Get from environment variable
 
 # Printer Name (for 'lpr')
-PRINTER_NAME = "Canon MX920 series Printer"  # e.g., "EPSON_XXXX" or leave blank for default
+PRINTER_NAME = ""  # e.g., "EPSON_XXXX" or leave blank for default
 
 # PDF output filename prefix
 PDF_PREFIX = "the_garden_report_daily_prayers"
