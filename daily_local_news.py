@@ -43,6 +43,20 @@ load_dotenv()  # Load environment variables from .env file
 # CONFIGURATION
 # ------------------------------------------------------
 
+# RSS Feeds and News Sites
+EAGLE_COUNTRY_URL = "https://www.eaglecountryonline.com/news/local-news/feed.xml"
+
+# Weather: Open-Meteo API
+CITY_NAME = "Lawrenceburg"  # City name for display purposes
+CITY_LAT = 39.0909  # city latitude
+CITY_LON = -84.85  # city longitude
+WEATHER_URL = (
+    f"https://api.open-meteo.com/v1/forecast?"
+    f"latitude={CITY_LAT}&longitude={CITY_LON}&timezone=America%2FNew_York"
+    f"&forecast_days=1&daily=temperature_2m_max,sunset,sunrise,precipitation_sum&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&hourly=temperature_2m,weather_code,precipitation_probability,precipitation"
+)
+
+
 # (Optional) OpenAI Summarization
 USE_OPENAI_SUMMARY = False
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Get from environment variable
@@ -72,67 +86,6 @@ except:
     except:
         print("[WARN] Could not set US locale, falling back to default")
 
-
-# TODO: Handle Lent / Advent changes to days
-# Rosary Prayers
-ROSARY_PRAYERS = [
-    {
-        "mysteries": [{
-            "name": "The Joyful Mysteries",
-            "daysOfWeek": [
-                "Monday",
-                "Saturday"
-            ],
-            "prayers": [
-                "Annunciation",
-                "Visitation",
-                "Nativity",
-                "Presentation at the Temple",
-                "Finding in the Temple",
-            ]
-        },{
-            "name": "The Sorrowful Mysteries",
-            "daysOfWeek": [
-                "Tuesday",
-                "Friday"
-            ],
-            "prayers": [
-                "Agony in the Garden",
-                "Scourging at the Pillar",
-                "Crowning with Thorns",
-                "Carrying the Cross",
-                "Crucifixion",
-            ]
-        },
-        {
-            "name": "The Glorious Mysteries",
-            "daysOfWeek": [
-                "Wednesday",
-                "Sunday"
-            ],
-            "prayers": [
-                "Resurrection",
-                "Ascension",
-                "Descent of the Holy Spirit",
-                "Assumption of Mary",
-                "Coronation of Mary as Queen of Heaven and Earth",
-            ]
-        },
-        {
-            "name": "The Luminous Mysteries",
-            "daysOfWeek": [
-                "Thursday",
-            ],
-            "prayers": [
-                "The Baptism of Jesus",
-                "The Wedding at Cana",
-                "The Proclamation of the Kingdom",
-                "The Transfiguration of Jesus",
-                "The Institution of the Eucharist",
-            ]
-        }]
-    }
-]
 
 # Register emoji font if available
 try:
@@ -190,65 +143,117 @@ def load_from_cache():
     
     return None
 
-def fetch_rosary(language=DEFAULT_LANGUAGE):
-    """
-    Return the Rosary mystery object for the current day of the week.
-    """
-    today = datetime.datetime.now().strftime("%A")  # e.g., 'Monday'
-    for mystery in ROSARY_PRAYERS[0]["mysteries"]:
-        if today in mystery["daysOfWeek"]:
-            return mystery
-    # Fallback: return the first mystery if none match (shouldn't happen)
-    return ROSARY_PRAYERS[0]["mysteries"][0]
 
-def fetch_usccb_readings(language=DEFAULT_LANGUAGE):
+
+
+def fetch_rss_headlines_with_details(feed_url, limit=5, language=DEFAULT_LANGUAGE):
     """
-    Scrape the daily readings and reflection from USCCB.
-    Returns a dictionary with 'readings' as a formatted string for the PDF.
+    Fetch headlines and content from an RSS feed, scrape the article link for each, and summarize with AI if content is long.
+    Returns a list of dicts with 'title' and 'content'.
     """
-    url = "https://bible.usccb.org/daily-bible-reading/"
     items = []
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-        resp = requests.get(url, timeout=10, headers=headers)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, 'html.parser')
+        feed = feedparser.parse(feed_url)
+        for entry in feed.entries[:limit]:
+            title = entry.title
+            # Get the full description/content
+            content = entry.description if hasattr(entry, 'description') else ''
 
-        readings_blocks = soup.find_all(class_="node--type-daily-reading")
-        for block in readings_blocks:
-            header_str = ""
-            body_str = ""
-            innerblocks = block.find_all(class_="innerblock")
-            for inner in innerblocks:
-                # Header
-                header = inner.find(class_="content-header")
-                if header:
-                    name = header.find(class_="name")
-                    address = header.find(class_="address")
-                    header_str = ""
-                    if name:
-                        header_str += name.get_text(strip=True)
-                    if address:
-                        if header_str:
-                            header_str += ": "
-                        header_str += address.get_text(strip=True)
-                else:
-                    header_str = ""
-                # Body
-                body = inner.find(class_="content-body")
-                body_str = body.get_text("\n", strip=True) if body else ""
+            # Try to get the article link
+            url = entry.link if hasattr(entry, 'link') else None
+            article_text = ''
+            if url:
+                try:
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    }
+                    resp = requests.get(url, timeout=10, headers=headers)
+                    resp.raise_for_status()
+                    soup = BeautifulSoup(resp.text, 'html.parser')
+                    for script in soup(["script", "style", "nav", "header", "footer", "aside"]):
+                        script.decompose()
+                    text = soup.get_text()
+                    lines = (line.strip() for line in text.splitlines())
+                    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                    article_text = ' '.join(chunk for chunk in chunks if chunk)
+                except Exception as e:
+                    print(f"[WARN] Could not fetch/process article content: {e}")
 
-                items.append({
-                    "title": header_str,
-                    "content": body_str
-                })
+            # If the article text is long, summarize it
+            if article_text and len(article_text) > 1000:
+                summary = summarize_text_with_openai(article_text[:8000], language=language)
+                content = summary
+            elif article_text:
+                content = article_text
+            else:
+                # If no article text, keep the original description
+                pass
 
+            items.append({
+                "title": title,
+                "content": content
+            })
     except Exception as e:
-        print(f"[ERROR] Could not fetch USCCB daily readings: {e}")
-        return None
+        print(f"[ERROR] RSS fetch error for {feed_url}: {e}")
     return items
+
+def fetch_weather(city_url):
+    """
+    Fetch weather data from Open-Meteo API, returning a list of dictionaries with weather details.
+    """
+
+    # WMO Weather interpretation codes (https://open-meteo.com/en/docs)
+    weather_descriptions = {
+        0: "☀️ Clear sky",
+        1: "🌤️ Mainly clear", 2: "⛅ Partly cloudy", 3: "☁️ Overcast",
+        45: "🌫️ Foggy", 48: "🌫️ Depositing rime fog",
+        51: "🌦️ Light drizzle", 53: "🌦️ Moderate drizzle", 55: "🌧️ Dense drizzle",
+        61: "🌧️ Slight rain", 63: "🌧️ Moderate rain", 65: "🌧️ Heavy rain",
+        71: "❄️ Slight snow", 73: "❄️ Moderate snow", 75: "❄️ Heavy snow",
+        77: "🌨️ Snow grains",
+        80: "🌦️ Slight rain showers", 81: "🌦️ Moderate rain showers", 82: "⛈️ Violent rain showers",
+        85: "🌨️ Slight snow showers", 86: "🌨️ Heavy snow showers",
+        95: "⛈️ Thunderstorm", 96: "⛈️ Thunderstorm with hail", 99: "⛈️ Thunderstorm with heavy hail"
+    }
+
+    items = []
+    try:
+        resp = requests.get(city_url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        if "daily" in data:
+            sunrise = datetime.datetime.strptime(data["daily"]["sunrise"][0], "%Y-%m-%dT%H:%M").strftime("%I:%M %p")
+            sunset = datetime.datetime.strptime(data["daily"]["sunset"][0], "%Y-%m-%dT%H:%M").strftime("%I:%M %p")
+
+            items.append({
+                "title": "Sunrise / Sunset",
+                "content": f"🌅 {sunrise} / 🌇 {sunset}"
+            })
+
+        if "hourly" in data:
+            for i, time in enumerate(data["hourly"]["time"]):
+                temperature = data["hourly"]["temperature_2m"][i]
+                weather_code = data["hourly"]["weather_code"][i]
+                precipitation_probability = data["hourly"]["precipitation_probability"][i]
+                precipitation = data["hourly"]["precipitation"][i]
+                time_formatted = datetime.datetime.strptime(time, "%Y-%m-%dT%H:%M").strftime("%I:%M %p")
+
+                weather_description = weather_descriptions.get(weather_code, "Unknown conditions")
+                if time_formatted in ["06:00 AM", "08:00 AM", "10:00 AM", "12:00 PM", "02:00 PM", "04:00 PM", "06:00 PM", "08:00 PM", "10:00 PM"]:
+                    items.append({
+                        "title": time_formatted,
+                        "content": (
+                            f"{temperature}°F - {weather_description}\n"
+                            f"{precipitation}in / {precipitation_probability}% chance\n"
+                        )
+                    })
+    except Exception as e:
+        print(f"[ERROR] Weather fetch: {e}")
+        return []  # Return an empty list on error
+    return items
+
+
 
 # ------------------------------------------------------
 # PDF GENERATION
@@ -299,6 +304,14 @@ def calculate_content_size(doc, content, styles):
             style_name, item = text
             if not item.strip():
                 continue
+
+            if isinstance(item, str):
+                has_emoji = any(ord(char) > 0x1F300 for char in item)
+            else:
+                has_emoji = False
+
+            style_to_use = styles["emoji_style"] if has_emoji else styles["article_style"]
+
             style = styles.get(style_name, styles["article_style"])
             flowables.append(Paragraph(item, style))
         else:
@@ -533,7 +546,7 @@ def build_newspaper_pdf(pdf_filename, story_content, target_pages=2):
             textColor=colors.black
         )
     }
-    
+
     # Calculate initial content size
     num_pages = calculate_content_size(doc, story_content, style_definitions)
     
@@ -586,6 +599,14 @@ def build_newspaper_pdf(pdf_filename, story_content, target_pages=2):
             style_name, text = item
             if not text.strip():
                 continue
+
+            if isinstance(text, str):
+                has_emoji = any(ord(char) > 0x1F300 for char in text)
+            else:
+                has_emoji = False
+
+            style_to_use = style_definitions["emoji_style"] if has_emoji else style_definitions["article_style"]
+            
             style = style_definitions.get(style_name, style_definitions["article_style"])
             flowables.append(Paragraph(text, style))
         else:
@@ -629,15 +650,6 @@ def print_pdf(pdf_filename, printer_name=""):
         print("Printing PDF using os.startfile ...")
         os.startfile(os.path.abspath(pdf_filename), "print")
 
-    # print_cmd = ["lpr", pdf_filename]
-    # if printer_name:
-    #     print_cmd = ["lpr", "-P", printer_name, pdf_filename]
-
-    # try:
-    #     subprocess.run(print_cmd, check=True)
-    #     print(f"Sent {pdf_filename} to printer '{printer_name or 'default'}'.")
-    # except Exception as e:
-    #     print(f"[ERROR] Printing file: {e}")
 
 # ------------------------------------------------------
 # MAIN
@@ -671,30 +683,35 @@ def main(use_cache=False, auto_print=False, articles_per_source=None, target_pag
     if content is None:
         content = []
 
-        # Add Rosary of the day
-        print("Fetching rosary of the day...")
-        rosary_data = fetch_rosary(DEFAULT_LANGUAGE)
-        if rosary_data:
-            content.append(("section_header_style", "Daily Rosary"))
-            content.append(("article_style_no_indent", rosary_data["name"]))
-            for idx, prayer in enumerate(rosary_data["prayers"], 1):
-                content.append(("article_style_small", f"{idx}. {prayer}"))
-            content.append("")
-            
-        
-        # Fetch daily readings and reflections from USCCB Daily Readings
-        print("Fetching daily readings and reflections from USCCB Daily Readings...")
-        usccb_readings_data = fetch_usccb_readings(DEFAULT_LANGUAGE)
-        if usccb_readings_data:
-            
-            content.append(("section_header_style", "USCCB Daily Readings"))
-            for idx, item in enumerate(usccb_readings_data, 1):
-                content.append(("article_title_style", item['title']))
+         # Add weather
+        weather_info = fetch_weather(WEATHER_URL)
+        print("Fetching weather...")
+        if weather_info:
+            print("Printing weather ...")
+            content.append(("section_header_style", "Daily Weather"))
+            for idx, item in enumerate(weather_info, 1):
+                content.append(("article_style_no_indent", item['title']))
                 if item.get('content'):
-                    content.append("")
-                    content.append(item['content'])
+                    content.append(("article_style_small", item['content']))
                 content.append("")
+
+
+
+        # Fetch and process Eagle Country news
+        # print("Fetching Eagle Country news...")
+        # eagle_country_news = fetch_rss_headlines_with_details(EAGLE_COUNTRY_URL, num_articles, DEFAULT_LANGUAGE)
         
+        # if eagle_country_news:
+        #     content.append("Local News - Top Stories")
+        #     content.append(SECTION_SEPARATOR)
+        #     for idx, item in enumerate(eagle_country_news, 1):
+        #         content.append(f"{idx}. {item['title']}")
+        #         if item.get('content'):
+        #             content.append("")
+        #             content.append(item['content'])
+        #         content.append("")
+        
+
         # Save to cache for future use
         save_to_cache(content)
     

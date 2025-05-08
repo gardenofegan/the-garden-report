@@ -152,67 +152,6 @@ FALLBACK_AFFIRMATIONS = [
     "Je crée ma propre réalité positive."
 ]
 
-# TODO: Handle Lent / Advent changes to days
-# Rosary Prayers
-ROSARY_PRAYERS = [
-    {
-        "mysteries": [{
-            "name": "The Joyful Mysteries",
-            "daysOfWeek": [
-                "Monday",
-                "Saturday"
-            ],
-            "prayers": [
-                "Annunciation",
-                "Visitation",
-                "Nativity",
-                "Presentation at the Temple",
-                "Finding in the Temple",
-            ]
-        },{
-            "name": "The Sorrowful Mysteries",
-            "daysOfWeek": [
-                "Tuesday",
-                "Friday"
-            ],
-            "prayers": [
-                "Agony in the Garden",
-                "Scourging at the Pillar",
-                "Crowning with Thorns",
-                "Carrying the Cross",
-                "Crucifixion",
-            ]
-        },
-        {
-            "name": "The Glorious Mysteries",
-            "daysOfWeek": [
-                "Wednesday",
-                "Sunday"
-            ],
-            "prayers": [
-                "Resurrection",
-                "Ascension",
-                "Descent of the Holy Spirit",
-                "Assumption of Mary",
-                "Coronation of Mary as Queen of Heaven and Earth",
-            ]
-        },
-        {
-            "name": "The Luminous Mysteries",
-            "daysOfWeek": [
-                "Thursday",
-            ],
-            "prayers": [
-                "The Baptism of Jesus",
-                "The Wedding at Cana",
-                "The Proclamation of the Kingdom",
-                "The Transfiguration of Jesus",
-                "The Institution of the Eucharist",
-            ]
-        }]
-    }
-]
-
 # Register emoji font if available
 try:
     # Try different possible paths for the Noto Color Emoji font
@@ -682,68 +621,6 @@ def fetch_daily_boost(language=DEFAULT_LANGUAGE):
     
     return boost_content
 
-
-def fetch_rosary(language=DEFAULT_LANGUAGE):
-    """
-    Return the Rosary mystery object for the current day of the week.
-    """
-    today = datetime.datetime.now().strftime("%A")  # e.g., 'Monday'
-    for mystery in ROSARY_PRAYERS[0]["mysteries"]:
-        if today in mystery["daysOfWeek"]:
-            return mystery
-    # Fallback: return the first mystery if none match (shouldn't happen)
-    return ROSARY_PRAYERS[0]["mysteries"][0]
-
-def fetch_usccb_readings(language=DEFAULT_LANGUAGE):
-    """
-    Scrape the daily readings and reflection from USCCB.
-    Returns a dictionary with 'readings' as a formatted string for the PDF.
-    """
-    url = "https://bible.usccb.org/daily-bible-reading/"
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-        resp = requests.get(url, timeout=10, headers=headers)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, 'html.parser')
-
-        readings_blocks = soup.find_all(class_="node--type-daily-reading")
-        readings_list = []
-        for block in readings_blocks:
-            innerblocks = block.find_all(class_="innerblock")
-            for inner in innerblocks:
-                # Header
-                header = inner.find(class_="content-header")
-                if header:
-                    name = header.find(class_="name")
-                    address = header.find(class_="address")
-                    header_str = ""
-                    if name:
-                        header_str += name.get_text(strip=True)
-                    if address:
-                        if header_str:
-                            header_str += ": "
-                        header_str += address.get_text(strip=True)
-                else:
-                    header_str = ""
-                # Body
-                body = inner.find(class_="content-body")
-                body_str = body.get_text("\n", strip=True) if body else ""
-                # Combine
-                if header_str:
-                    readings_list.append(header_str)
-                    readings_list.append("\n")  # Blank line between readings
-                if body_str:
-                    readings_list.append(body_str)
-                readings_list.append("\n\n")  # Blank line between readings
-        readings = "\n".join(readings_list).strip()
-        return {
-            "readings": readings
-        }
-    except Exception as e:
-        print(f"[ERROR] Could not fetch USCCB daily readings: {e}")
-        return None
 
 # ------------------------------------------------------
 # PDF GENERATION

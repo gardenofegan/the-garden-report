@@ -4,3 +4,4 @@ press/
 cache/
 *.pkl
 .DS_Store
+*.bat
